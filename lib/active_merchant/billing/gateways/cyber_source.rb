@@ -108,6 +108,14 @@ module ActiveMerchant #:nodoc:
       #                       if CVV would have failed
       def initialize(options = {})
         requires!(options, :login, :password)
+        @default_address = {
+            :address1 => 'Unspecified',
+            :city => 'Unspecified',
+            :state => 'NC',
+            :zip => '00000',
+            :country => 'US'
+          }
+        
         super
       end
 
@@ -240,14 +248,7 @@ module ActiveMerchant #:nodoc:
       # Create all address hash key value pairs so that we still function if we
       # were only provided with one or two of them or even none
       def setup_address_hash(options)
-        default_address = {
-          :address1 => 'Unspecified',
-          :city => 'Unspecified',
-          :state => 'NC',
-          :zip => '00000',
-          :country => 'US'
-        }
-        options[:billing_address] = options[:billing_address] || options[:address] || default_address
+        options[:billing_address] = options[:billing_address] || options[:address] || @default_address
         options[:shipping_address] = options[:shipping_address] || {}
       end
 
@@ -450,8 +451,13 @@ module ActiveMerchant #:nodoc:
 
       def add_address(xml, payment_method, address, options, shipTo = false)
         xml.tag! shipTo ? 'shipTo' : 'billTo' do
-          xml.tag! 'firstName',             payment_method.first_name             if payment_method
-          xml.tag! 'lastName',              payment_method.last_name              if payment_method
+          if payment_method
+            xml.tag! 'firstName',           payment_method.try(:first_name) if payment_method
+            xml.tag! 'lastName',            payment_method.try(:last_name)  if payment_method
+          elsif (address[:first_name] && address[:last_name])
+            xml.tag! 'firstName',           address[:first_name]
+            xml.tag! 'lastName',            address[:last_name]
+          end
           xml.tag! 'street1',               address[:address1]
           xml.tag! 'street2',               address[:address2]                unless address[:address2].blank?
           xml.tag! 'city',                  address[:city]
@@ -461,7 +467,7 @@ module ActiveMerchant #:nodoc:
           xml.tag! 'company',               address[:company]                 unless address[:company].blank?
           xml.tag! 'companyTaxID',          address[:companyTaxID]            unless address[:company_tax_id].blank?
           xml.tag! 'phoneNumber',           address[:phone]                   unless address[:phone].blank?
-          xml.tag! 'email',                 options[:email] || 'null@cybersource.com'
+          xml.tag! 'email',                 options[:email] || address[:email] || 'null@cybersource.com'
           xml.tag! 'ipAddress',             options[:ip]                      unless options[:ip].blank? || shipTo
           xml.tag! 'driversLicenseNumber',  options[:drivers_license_number]  unless options[:drivers_license_number].blank?
           xml.tag! 'driversLicenseState',   options[:drivers_license_state]   unless options[:drivers_license_state].blank?
@@ -669,9 +675,8 @@ module ActiveMerchant #:nodoc:
 
       def add_payment_method_or_subscription(xml, money, payment_method_or_reference, options)
         if payment_method_or_reference.is_a?(String)
-          add_line_item_data(xml, options) if options[:line_items]
-          add_address(xml, payment_method_or_reference, options[:billing_address], options) if options[:billing_address]
-          add_address(xml, payment_method_or_reference, options[:shipping_address], options, true) if options[:shipping_address]
+          add_address(xml, nil, options[:billing_address], options) if options[:billing_address].present? && options[:billing_address] != @default_address
+          add_address(xml, nil, options[:shipping_address], options, true) if options[:shipping_address].present?
           add_purchase_data(xml, money, true, options)
           add_subscription(xml, options, payment_method_or_reference)
         elsif card_brand(payment_method_or_reference) == 'check'
